@@ -15,12 +15,18 @@ const app = express();
 // (the public lead-intake endpoint) — both need a CORS allowlist entry.
 // Ad-platform webhooks (Meta) aren't browser requests, so CORS doesn't
 // apply to them at all.
+// FRONTEND_URL / MAIN_SITE_URL may hold several comma-separated origins.
+// The live website is always allowed (with and without www) so a missing
+// MAIN_SITE_URL on the host can't silently block every website lead.
+const fromEnv = (v) => (v || '').split(',').map((s) => s.trim().replace(/\/$/, '')).filter(Boolean);
 const ALLOWED_ORIGINS = [
-  process.env.FRONTEND_URL,
-  process.env.MAIN_SITE_URL,
+  ...fromEnv(process.env.FRONTEND_URL),
+  ...fromEnv(process.env.MAIN_SITE_URL),
+  'https://veekaycabs.com',
+  'https://www.veekaycabs.com',
   'http://localhost:3000',
   'http://localhost:4100',
-].filter(Boolean);
+];
 
 app.use(cors({
   origin: (origin, callback) => {

@@ -1,7 +1,7 @@
 {
   "name": "veekay-crm-server",
   "version": "1.0.0",
-  "description": "Veekay Cabs CRM Backend API — lead management & sales CRM",
+  "description": "Veekay Cabs CRM Backend API \u2014 lead management & sales CRM",
   "main": "src/server.js",
   "engines": {
     "node": ">=18"
@@ -9,7 +9,8 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
-    "seed:admin": "node src/scripts/seedSuperAdmin.js"
+    "seed:admin": "node src/scripts/seedSuperAdmin.js",
+    "reset:password": "node src/scripts/resetPassword.js"
   },
   "dependencies": {
     "axios": "^1.17.0",
