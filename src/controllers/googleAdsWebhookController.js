@@ -34,17 +34,31 @@ const receiveGoogleAdsLead = async (req, res) => {
     const name = extractField(columns, 'FULL_NAME')
       || [extractField(columns, 'FIRST_NAME'), extractField(columns, 'LAST_NAME')].filter(Boolean).join(' ')
       || 'Google Lead';
-    const mobile = extractField(columns, 'PHONE_NUMBER');
-    if (!mobile) {
+    // Google sends +91XXXXXXXXXX; the website sends 10 digits. Store Indian
+    // numbers as 10 digits so duplicate detection matches across sources.
+    const rawMobile = extractField(columns, 'PHONE_NUMBER');
+    if (!rawMobile) {
       return res.status(400).json({ success: false, message: 'No phone number in payload' });
     }
+    const digits = rawMobile.replace(/\D/g, '');
+    const mobile = digits.length === 12 && digits.startsWith('91') ? digits.slice(2) : (digits || rawMobile);
     const email = extractField(columns, 'EMAIL');
+    const city = extractField(columns, 'CITY');
+
+    // Any other answers on the form (custom questions etc.) go into notes so
+    // the salesperson sees everything the customer filled in.
+    const KNOWN = ['FULL_NAME', 'FIRST_NAME', 'LAST_NAME', 'PHONE_NUMBER', 'EMAIL', 'CITY'];
+    const extras = (columns || [])
+      .filter((c) => !KNOWN.includes(c.column_id) && c.string_value)
+      .map((c) => `${c.column_name || c.column_id}: ${c.string_value}`);
 
     const duplicateOf = await Lead.findOne({ mobile, isDeleted: { $ne: true } }).sort({ createdAt: -1 });
 
     const lead = await Lead.create({
       leadCode: await generateLeadCode(),
       name, mobile, email,
+      pickupLocation: city,
+      notes: extras.length ? extras.join('\n') : undefined,
       source: 'Google Ads',
       campaign: body.campaign_id,
       utm: { source: 'google', campaign: body.campaign_id, gclid: body.gcl_id },
