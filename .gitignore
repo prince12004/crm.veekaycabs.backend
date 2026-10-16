@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Secrets — never commit real env files (DB URI, JWT secrets, API keys)
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
