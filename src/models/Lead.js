@@ -18,6 +18,8 @@ const ESCALATION_STATUSES = [
   'Service Issue', 'Service Unavailable', 'Other Issue',
 ];
 
+const SUPER_ADMIN_REVIEW_STATUSES = [...ESCALATION_STATUSES, 'Interested'];
+
 // Statuses that require a reason before they can be saved (SRS 4.1).
 const REASON_REQUIRED_STATUSES = [...ESCALATION_STATUSES, 'Lost'];
 
@@ -79,5 +81,6 @@ LeadSchema.statics.STATUSES = LEAD_STATUSES;
 LeadSchema.statics.SOURCES = LEAD_SOURCES;
 LeadSchema.statics.REASON_REQUIRED_STATUSES = REASON_REQUIRED_STATUSES;
 LeadSchema.statics.ESCALATION_STATUSES = ESCALATION_STATUSES;
+LeadSchema.statics.SUPER_ADMIN_REVIEW_STATUSES = SUPER_ADMIN_REVIEW_STATUSES;
 
 module.exports = mongoose.model('Lead', LeadSchema);

@@ -3,6 +3,7 @@ const LeadActivity = require('../models/LeadActivity');
 const CrmUser = require('../models/CrmUser');
 const { MainUser, MainBooking } = require('../models/MainSiteRefs');
 const { autoAssignLead } = require('../services/assignmentService');
+const { notifyAdminLeadInterested } = require('../services/whatsapp');
 
 const SLA_MINUTES = 15;
 
@@ -199,6 +200,16 @@ const updateLead = async (req, res) => {
       if (Lead.REASON_REQUIRED_STATUSES.includes(newStatus) && !req.body.reason && !lead.reason) {
         return res.status(400).json({ success: false, message: `A reason is required to mark this lead "${newStatus}"` });
       }
+
+      const shouldTransferToSuperAdmin =
+        req.crmUser.role !== 'super_admin' && Lead.SUPER_ADMIN_REVIEW_STATUSES.includes(newStatus);
+      const superAdmin = shouldTransferToSuperAdmin
+        ? await CrmUser.findOne({ role: 'super_admin', isActive: true }).sort({ lastAssignedAt: 1 })
+        : null;
+      if (shouldTransferToSuperAdmin && !superAdmin) {
+        return res.status(409).json({ success: false, message: 'No active Super Admin is available to receive this lead' });
+      }
+
       lead.status = newStatus;
       await log(lead._id, 'status_change', {
         message: `Status changed from "${prevStatus}" to "${newStatus}"`,
@@ -206,26 +217,30 @@ const updateLead = async (req, res) => {
         by: req.crmUser._id,
       });
 
-      // A salesperson marking a lead "Not Interested" or any of the issue
-      // statuses (Customer/Price/Payment/Service/Other Issue) hands it to
-      // Super Admin for review rather than leaving it to quietly sit in
-      // that salesperson's own closed-out leads — the full assignment/status
-      // history stays intact either way (nothing here ever deletes it).
-      if (Lead.ESCALATION_STATUSES.includes(newStatus) && req.crmUser.role !== 'super_admin') {
+      // Interested leads and escalations are moved to Super Admin for review.
+      // Clearing the SLA deadline prevents them re-entering salesperson rotation.
+      if (shouldTransferToSuperAdmin) {
         const previousOwner = lead.assignedTo;
-        const superAdmin = await CrmUser.findOne({ role: 'super_admin', isActive: true }).sort({ lastAssignedAt: 1 });
-        if (superAdmin && String(superAdmin._id) !== String(previousOwner)) {
+        if (String(superAdmin._id) !== String(previousOwner)) {
           lead.assignedTo = superAdmin._id;
+          lead.assignedAt = new Date();
           await log(lead._id, 'reassignment', {
-            message: `Marked "${newStatus}" by ${req.crmUser.name} (reason: ${req.body.reason || lead.reason || 'N/A'}) — moved to ${superAdmin.name} for review`,
+            message: `Marked "${newStatus}" by ${req.crmUser.name}${req.body.reason || lead.reason ? ` (reason: ${req.body.reason || lead.reason})` : ''} — moved to ${superAdmin.name} for review`,
             meta: { from: previousOwner, to: superAdmin._id, reason: newStatus },
             by: req.crmUser._id,
           });
         }
+        lead.slaDeadline = null;
+        lead.slaBreached = false;
       }
     }
 
     await lead.save();
+
+    let notification = null;
+    if (req.body.status === 'Interested' && prevStatus !== 'Interested' && req.crmUser.role !== 'super_admin') {
+      notification = await notifyAdminLeadInterested(lead, req.crmUser.name);
+    }
 
     if (req.body.nextFollowUpAt) {
       await log(lead._id, 'follow_up_scheduled', {
@@ -235,7 +250,11 @@ const updateLead = async (req, res) => {
     }
 
     const populated = await Lead.findById(lead._id).populate('assignedTo', 'name email');
-    return res.json({ success: true, data: populated });
+    return res.json({
+      success: true,
+      data: populated,
+      ...(notification ? { notification: { sent: notification.success, reason: notification.reason } } : {}),
+    });
   } catch (error) {
     console.error('crm updateLead error:', error);
     return res.status(500).json({ success: false, message: 'Failed to update lead' });

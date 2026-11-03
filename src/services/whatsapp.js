@@ -26,8 +26,8 @@ const sendSessionMessage = async (mobile, message) => {
   const destination = cleanMobile(mobile);
   if (!destination) return { success: false, reason: 'no_mobile' };
   if (!isConfigured()) {
-    console.log(`[CRM WhatsApp] To ${destination}: ${message}`);
-    return { success: true };
+    console.error('[CRM WhatsApp] AiSensy is not configured; message was not sent');
+    return { success: false, reason: 'not_configured' };
   }
   try {
     const res = await axios.post(AISENSY_API_URL, {
@@ -58,4 +58,26 @@ const notifyAdminNewLead = async (lead) => {
   return Promise.all(getAdminMobiles().map((mobile) => sendSessionMessage(mobile, message)));
 };
 
-module.exports = { sendSessionMessage, notifyAdminNewLead };
+const notifyAdminLeadInterested = async (lead, salespersonName) => {
+  const adminMobiles = getAdminMobiles();
+  if (adminMobiles.length === 0) {
+    console.error('[CRM WhatsApp] ADMIN_MOBILE is not configured; Interested lead alert was not sent');
+    return { success: false, reason: 'no_admin_recipients' };
+  }
+
+  const message =
+    `⭐ Lead marked Interested\n` +
+    `Lead ID: ${lead.leadCode}\n` +
+    `Name: ${lead.name}\n` +
+    `Mobile: ${lead.mobile}\n` +
+    `Marked by: ${salespersonName}\n` +
+    `Assigned to: Super Admin`;
+  const results = await Promise.all(adminMobiles.map((mobile) => sendSessionMessage(mobile, message)));
+  const success = results.every((result) => result.success);
+  if (!success) {
+    console.error('[CRM WhatsApp] Interested lead alert failed for one or more admin recipients');
+  }
+  return { success, reason: success ? undefined : 'delivery_failed' };
+};
+
+module.exports = { sendSessionMessage, notifyAdminNewLead, notifyAdminLeadInterested };

@@ -8,7 +8,10 @@ const { pickNextSalesperson, SLA_MINUTES } = require('../services/assignmentServ
 // doesn't need to be chased, breached or not.
 // Escalated leads sit with Super Admin for review, so they're out of the
 // salesperson rotation too.
-const CLOSED_STATUSES = ['Booking Confirmed', 'Lost', 'Cancelled', 'Duplicate', 'Invalid Lead', ...Lead.ESCALATION_STATUSES];
+const CLOSED_STATUSES = [
+  'Booking Confirmed', 'Lost', 'Cancelled', 'Duplicate', 'Invalid Lead',
+  ...Lead.SUPER_ADMIN_REVIEW_STATUSES,
+];
 
 // SRS 5.2 — a lead whose owner hasn't logged a call/WhatsApp (the "valid
 // first action") within 15 minutes of assignment gets automatically handed
@@ -27,36 +30,47 @@ const checkSlaBreaches = async () => {
 
   for (const lead of overdue) {
     try {
-      const previousOwner = lead.assignedTo;
+      const currentLead = await Lead.findOne({
+        _id: lead._id,
+        assignedTo: { $ne: null },
+        firstActionAt: null,
+        slaBreached: false,
+        slaDeadline: { $lte: new Date() },
+        isDeleted: { $ne: true },
+        status: { $nin: CLOSED_STATUSES },
+      }).populate('assignedTo', 'name');
+      if (!currentLead) continue;
+
+      const previousOwner = currentLead.assignedTo;
       const nextOwner = await pickNextSalesperson(previousOwner?._id);
 
       if (!nextOwner) {
         // Nobody else to hand it to — flag the breach and leave it with the
         // same owner rather than silently looping it back to themselves.
-        lead.slaBreached = true;
-        lead.slaBreachCount += 1;
-        await lead.save();
+        currentLead.slaBreached = true;
+        currentLead.slaBreachCount += 1;
+        await currentLead.save();
         await LeadActivity.create({
-          leadId: lead._id,
+          leadId: currentLead._id,
           type: 'sla_breach',
           message: `SLA breached — no other active salesperson available to reassign to. Still with ${previousOwner?.name || 'current owner'}.`,
         });
         continue;
       }
 
-      lead.assignedTo = nextOwner._id;
-      lead.assignedAt = now;
-      lead.slaDeadline = new Date(now.getTime() + SLA_MINUTES * 60 * 1000);
-      lead.slaBreached = false; // reset for the NEW owner's fresh 15-minute window
-      lead.slaBreachCount += 1; // but the lifetime count keeps climbing
-      lead.firstActionAt = null;
-      await lead.save();
+      currentLead.assignedTo = nextOwner._id;
+      currentLead.assignedAt = now;
+      currentLead.slaDeadline = new Date(now.getTime() + SLA_MINUTES * 60 * 1000);
+      currentLead.slaBreached = false; // reset for the NEW owner's fresh 15-minute window
+      currentLead.slaBreachCount += 1; // but the lifetime count keeps climbing
+      currentLead.firstActionAt = null;
+      await currentLead.save();
 
       nextOwner.lastAssignedAt = now;
       await nextOwner.save();
 
       await LeadActivity.create({
-        leadId: lead._id,
+        leadId: currentLead._id,
         type: 'reassignment',
         message: `SLA breached — reassigned from ${previousOwner?.name || 'previous owner'} to ${nextOwner.name}`,
         meta: { from: previousOwner?._id, to: nextOwner._id, reason: 'SLA Breach' },
